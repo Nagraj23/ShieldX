@@ -125,7 +125,7 @@ export default function RouteUpdate() {
   }, []);
 
   const fetchCoords = async (address) => {
-    const GOOGLE_API_KEY = "AIzaSyC9wUqhLFroJbDWTuOwYhjw0OzpllfndNc";
+    const GOOGLE_API_KEY = "xxxxxxxxxx";
     try {
       const res = await fetch(
         `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_API_KEY}`
