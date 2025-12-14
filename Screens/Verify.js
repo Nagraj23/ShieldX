@@ -1,39 +1,107 @@
 import React, { useRef, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet,Image } from "react-native";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+  ToastAndroid,
+  Alert,
+} from "react-native";
+import { AUTH_URL } from "../constants/api";
 
-const Otp = ({ navigation }) => {
-  const [otp, setOtp] = useState(["", "", "", "", ""]);
+const Verify = ({ navigation, route }) => {
+  const { phoneNo } = route.params;
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
+  const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
   const [verified, setVerified] = useState(false);
-  const inputs = [useRef(), useRef(), useRef(), useRef(), useRef()];
+
+  const inputs = Array(6).fill().map(() => useRef());
 
   const handleChange = (text, idx) => {
     if (/^\d?$/.test(text)) {
       const newOtp = [...otp];
       newOtp[idx] = text;
       setOtp(newOtp);
-      if (text && idx < 4) {
+
+      if (text && idx < 5) {
         inputs[idx + 1].current.focus();
-      }
-      if (!text && idx > 0) {
+      } else if (!text && idx > 0) {
         inputs[idx - 1].current.focus();
       }
     }
   };
 
-  const handleVerify = () => {
-   navigation.navigate("Login");
+  const handleVerify = async () => {
+    const otpCode = otp.join("");
+
+    if (otpCode.length < 6) {
+      Alert.alert("Error", "Please enter all 6 digits of the OTP.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`https://shieldx-auth.onrender.com/auth/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phoneNo, otp: otpCode }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.message?.includes("verified")) {
+        ToastAndroid.show("Phone verified ✅", ToastAndroid.SHORT);
+        setVerified(true);
+        navigation.replace("Login");
+      } else {
+        Alert.alert("Invalid OTP", data.message || "Try again");
+      }
+    } catch (err) {
+      console.error("❌ OTP Verify Error:", err.message);
+      Alert.alert("Error", "Verification failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResendOtp = async () => {
+    setResending(true);
+    try {
+      const res = await fetch(`${AUTH_URL}/auth/resend-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ phoneNo }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.message?.includes("OTP")) {
+        ToastAndroid.show("OTP resent to your phone 📱", ToastAndroid.SHORT);
+      } else {
+        Alert.alert("Error", data.message || "Resend failed");
+      }
+    } catch (err) {
+      console.error("❌ Resend OTP error:", err.message);
+      Alert.alert("Error", "Couldn't resend OTP. Try again.");
+    } finally {
+      setResending(false);
+    }
   };
 
   return (
     <View style={styles.container}>
-         <View style={{ flexDirection: "column", marginBottom: 20 }}>
-            <Image
-              source={require("../assets/verify.png")}
-              style={{ width: 380, height: 380, resizeMode: "contain" }}
-            />
-          </View>
+      <Image
+        source={require("../assets/verify.png")}
+        style={{ width: 380, height: 300, resizeMode: "contain" }}
+      />
+
       <Text style={styles.title}>OTP Verification</Text>
-      <Text style={styles.subtitle}>Enter the 5-digit code sent to your email</Text>
+      <Text style={styles.subtitle}>
+        Enter the 6-digit code sent to +91-{phoneNo}
+      </Text>
+
       <View style={styles.otpContainer}>
         {otp.map((digit, idx) => (
           <TextInput
@@ -43,38 +111,50 @@ const Otp = ({ navigation }) => {
             keyboardType="number-pad"
             maxLength={1}
             value={digit}
-            onChangeText={text => handleChange(text, idx)}
+            onChangeText={(text) => handleChange(text, idx)}
             placeholder="-"
             placeholderTextColor="#bbb"
             autoFocus={idx === 0}
           />
         ))}
       </View>
+
       <TouchableOpacity
-        style={[styles.button, verified && { backgroundColor: "#999" }]}
+        style={[styles.button, loading && { backgroundColor: "#888" }]}
         onPress={handleVerify}
-        disabled={verified}
+        disabled={loading}
       >
         <Text style={styles.buttonText}>
-          {verified ? "Verified ✅" : "Verify"}
+          {loading ? "Verifying..." : "Verify"}
         </Text>
       </TouchableOpacity>
+
+      <TouchableOpacity
+        onPress={handleResendOtp}
+        disabled={resending}
+        style={{ marginTop: 15 }}
+      >
+        <Text style={styles.resendText}>
+          {resending ? "Resending..." : "Resend OTP"}
+        </Text>
+      </TouchableOpacity>
+
       {verified && (
-        <Text style={styles.successText}>Account verified successfully!</Text>
+        <Text style={styles.successText}>Account verified successfully! ✅</Text>
       )}
     </View>
   );
 };
 
-export default Otp;
+export default Verify;
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: "#fff",
-        paddingHorizontal: 20,
-        paddingTop: 20, // Add this line to reduce top space
-      },
+  container: {
+    flex: 1,
+    backgroundColor: "#fff",
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
   title: {
     fontSize: 26,
     color: "#1E90FF",
@@ -104,10 +184,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: "#333",
     backgroundColor: "#f6f7fb",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
     elevation: 2,
   },
   button: {
@@ -120,6 +196,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: "center",
     fontWeight: "bold",
+  },
+  resendText: {
+    textAlign: "center",
+    color: "#1E90FF",
+    fontWeight: "bold",
+    fontSize: 16,
   },
   successText: {
     marginTop: 20,

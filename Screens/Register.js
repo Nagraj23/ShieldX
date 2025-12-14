@@ -2,232 +2,264 @@ import React, { useState } from "react";
 import {
   View,
   Text,
-  Image,
   Alert,
   ToastAndroid,
   StatusBar,
   StyleSheet,
-  KeyboardAvoidingView,
   TextInput,
   TouchableOpacity,
   ScrollView,
   Platform,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Image,
 } from "react-native";
+import Feather from 'react-native-vector-icons/Feather';
 
-const Register = ({ navigation }) => {
-  const [email, setEmail] = useState("");
-  const [phoneNo, setPhoneNo] = useState("");
-  const [password, setPassword] = useState("");
+import { AUTH_URL } from '../constants/api';
+
+const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const validatePhoneNo = (phoneNo) => phoneNo.length === 10 && /^\d+$/.test(phoneNo);
+
+const Register = ({ navigation, setIsSignUp }) => {
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    phoneNo: "",
+    password: "",
+  });
+  const [isLoading, setIsLoading] = useState(false);
+  const [errors, setErrors] = useState({});
+
+  const handleChange = (key, value) => {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+    if (errors[key]) setErrors(prev => ({ ...prev, [key]: null }));
+  };
+
+  const validateForm = () => {
+    let newErrors = {};
+    let isValid = true;
+
+    if (!formData.name) { newErrors.name = "Name is required."; isValid = false; }
+    if (!formData.email || !validateEmail(formData.email)) { newErrors.email = "A valid email is required."; isValid = false; }
+    if (!formData.phoneNo || !validatePhoneNo(formData.phoneNo)) { newErrors.phoneNo = "Phone number must be 10 digits."; isValid = false; }
+    if (!formData.password || formData.password.length < 6) { newErrors.password = "Password must be at least 6 characters."; isValid = false; }
+
+    setErrors(newErrors);
+    return isValid;
+  };
 
   const handleRegister = async () => {
-    // if (!email || !phoneNo || !password) {
-    //   Alert.alert("Error", "All fields are required");
-    //   return;
-    // }
+    if (!validateForm()) {
+      ToastAndroid.show("Please fix the errors in the form.", ToastAndroid.SHORT);
+      return;
+    }
 
-    // try {
-    //   const response = await fetch("http://192.168.124.241:3002/register", {
-    //     method: "POST",
-    //     headers: { "Content-Type": "application/json" },
-    //     body: JSON.stringify({ email, phoneNo, password }),
-    //   });
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${AUTH_URL}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
 
-    //   if (response.ok) {
-    //     ToastAndroid.show("User registered successfully", ToastAndroid.LONG);
-    //     navigation.navigate("Login");
-    //   } else {
-    //     const errorData = await response.json();
-    //     Alert.alert("Error", errorData.error || "Registration failed.");
-    //   }
-    // } catch (error) {
-    //   Alert.alert("Error", "Unable to connect to the server. Try again later.");
-    // }
-    navigation.navigate("Verify");
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        ToastAndroid.show("OTP sent to your email! Verifying...", ToastAndroid.LONG);
+        navigation.navigate("Verify", {
+          email: formData.email,
+          phoneNo: formData.phoneNo
+        });
+      } else {
+        Alert.alert("Registration Failed", data.message || "Check your network and try again.");
+      }
+    } catch (error) {
+      console.error("Registration error:", error.message);
+      Alert.alert("Connection Error", "Unable to connect to the server. Check your internet.");
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  const renderInput = (key, iconName, placeholder, keyboardType, secureTextEntry = false) => (
+    <View style={styles.inputContainer}>
+      <Feather name={iconName} size={20} color={errors[key] ? '#E74C3C' : '#8d99ae'} style={styles.icon}/>
+      <TextInput
+        style={[styles.input, errors[key] && styles.inputError]}
+        placeholder={placeholder}
+        placeholderTextColor="#8d99ae"
+        value={formData[key]}
+        onChangeText={(value) => handleChange(key, value)}
+        keyboardType={keyboardType}
+        secureTextEntry={secureTextEntry}
+      />
+      {errors[key] && <Text style={styles.errorText}>{errors[key]}</Text>}
+    </View>
+  );
 
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-        {/* Avatar Icon */}
-        {/* <View style={styles.avatarContainer}>
-          <View style={styles.avatarCircle}>
-            <Image
-              source={require("../assets/register.png")}
-              style={styles.avatarImage}
-            />
+      <ScrollView
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.innerContent}>
+          <Image
+            source={require('../assets/shieldx_logo.png')} // logo here
+            style={styles.logo}
+            resizeMode="contain"
+          />
+
+          <Text style={styles.title}>Create Account</Text>
+          <Text style={styles.subtitle}>Sign up to start protecting your world with ShieldX</Text>
+
+          <View style={styles.inputGroup}>
+            {renderInput("name", "user", "Full Name", "default")}
+            {renderInput("email", "mail", "Email Address", "email-address")}
+            {renderInput("phoneNo", "phone", "Phone Number", "phone-pad")}
+            {renderInput("password", "lock", "Password (min 6 chars)", "default", true)}
           </View>
-        </View> */}
-        {/* Title and Subtitle */}
-        <Text style={styles.title}>Register</Text>
-        <Text style={styles.subtitle}>Enter Your Personal Information</Text>
-        {/* Input Fields */}
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Username</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Enter your name"
-            placeholderTextColor="#bdbdbd"
-            value={phoneNo}
-            onChangeText={setPhoneNo}
-          />
-          <Text style={styles.label}>Email</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Enter your email"
-            placeholderTextColor="#bdbdbd"
-            keyboardType="email-address"
-            value={email}
-            onChangeText={setEmail}
-          />
-          <Text style={styles.label}>Password</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Enter password"
-            placeholderTextColor="#bdbdbd"
-            secureTextEntry
-            value={password}
-            onChangeText={setPassword}
-          />
-        </View>
-        {/* Register Button */}
-        <TouchableOpacity style={styles.button} onPress={handleRegister} activeOpacity={0.9}>
-          <Text style={styles.buttonText}>Register</Text>
-        </TouchableOpacity>
 
-        <View style={styles.orContainer}>
-          <View style={styles.line} />
-          <Text style={styles.orText}>OR</Text>
-          <View style={styles.line} />
-        </View>
-        <View style={styles.socialRow}>
-          <TouchableOpacity >
-            <Image source={require("../assets/google.png")} style={styles.socialIcon} />
+          <TouchableOpacity
+            activeOpacity={0.8}
+            disabled={isLoading}
+            onPress={handleRegister}
+            style={[styles.button, isLoading && styles.buttonDisabled]}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Text style={styles.buttonText}>Register</Text>
+            )}
           </TouchableOpacity>
-          <TouchableOpacity >
-            <Image source={require("../assets/face.png")} style={styles.socialIcon} />
-          </TouchableOpacity>
-         
-        </View>
 
-        <View style={{marginTop: 10, alignItems: "center"}}>
-          <Text style={{color: "#22223b", fontSize: 18}}>Already have an account?</Text>
-          <TouchableOpacity onPress={() => navigation.navigate("Login")}>
-            <Text style={{color: "#1E90FF", fontSize: 18, fontWeight: "bold"}}>Login</Text>
+          <TouchableOpacity
+            onPress={() => setIsSignUp(false)}
+            style={styles.loginLink}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.loginLinkText}>
+              Already have an account? <Text style={styles.loginLinkHighlight}>Login</Text>
+            </Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
-      <StatusBar style="auto" />
+      <StatusBar barStyle="dark-content" />
     </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f5f5f5" },
-  scrollContainer: { flexGrow: 1, justifyContent: "center", alignItems: "center", paddingVertical: 30 },
- 
+  container: {
+    flex: 1,
+    backgroundColor: "#F8F8F8",
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+  },
+  scrollContainer: {
+    flexGrow: 1,
+    paddingHorizontal: 25,
+    paddingBottom: 40,
+  },
+  innerContent: {
+    marginTop: 40,
+    alignItems: "center",
+  },
+  logo: {
+    width: 150,
+    height: 150,
+    marginBottom: 20,
+  },
   title: {
-    fontSize: 32,
-    fontWeight: "bold",
+    fontSize: 36,
+    fontWeight: "800",
     color: "#22223b",
-    marginBottom: 4,
+    marginBottom: 6,
     textAlign: "center",
   },
   subtitle: {
-    fontSize: 18,
+    fontSize: 16,
     color: "#8d99ae",
-    marginBottom: 25,
+    marginBottom: 35,
     textAlign: "center",
+    lineHeight: 22,
   },
   inputGroup: {
-    width: "90%",
-    marginBottom: 25,
+    width: "100%",
+    marginBottom: 20,
   },
-  label: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#22223b",
-    marginBottom: 6,
-    marginLeft: 10,
+  inputContainer: {
+    marginBottom: 20,
   },
   input: {
     backgroundColor: "#fff",
-    borderRadius: 50,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
+    borderRadius: 15,
+    height: 55,
+    paddingHorizontal: 45,
     fontSize: 16,
     color: "#22223b",
-    marginBottom: 18,
-    // Remove border for a cleaner look
+    borderWidth: 1,
+    borderColor: '#EAEAEA',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  icon: {
+    position: 'absolute',
+    top: 17,
+    left: 15,
+    zIndex: 1,
+  },
+  inputError: {
+    borderColor: '#E74C3C',
+  },
+  errorText: {
+    color: '#E74C3C',
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 15,
   },
   button: {
-    backgroundColor: "#1E90FF",
-    width: "90%",
-    paddingVertical: 16,
-    borderRadius: 25,
+    backgroundColor: "#1E90FF", // solid color
+    width: "100%",
+    paddingVertical: 18,
+    borderRadius: 15,
     alignItems: "center",
-    marginTop: 10,
-    marginBottom: 10,
+    marginTop: 15,
     shadowColor: "#1E90FF",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 4,
+    elevation: 8,
+  },
+  buttonDisabled: {
+    backgroundColor: "#7FC2FF",
   },
   buttonText: {
     color: "#fff",
-    fontWeight: "bold",
-    fontSize: 20,
-    letterSpacing: 1,
+    fontWeight: "700",
+    fontSize: 18,
+    letterSpacing: 0.5,
   },
-  orContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: 18,
-    width: "90%",
-    alignSelf: "center"
+  loginLink: {
+    marginTop: 25,
+    padding: 5,
   },
-  line: {
-    flex: 1,
-    height: 1,
-    width:50,
-    backgroundColor: "#d1d5db",
-  },
-  orText: {
-    marginHorizontal: 10,
+  loginLinkText: {
     color: "#8d99ae",
-    fontWeight: "bold",
-    fontSize: 16,
+    fontSize: 15,
+    fontWeight: "500",
+    textAlign: "center",
   },
-  socialRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 10,
-    gap: 18,
-  },
-  socialCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: "#fff",
-    borderWidth: 1,
-    borderColor: "#e0e1ea",
-    alignItems: "center",
-    justifyContent: "center",
-    marginHorizontal: 8,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  socialIcon: {
-    width: 45,
-    height:45,
-    resizeMode: "contain",
+  loginLinkHighlight: {
+    color: "#1E90FF",
+    fontWeight: 'bold',
   },
 });
 

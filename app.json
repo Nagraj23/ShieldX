@@ -2,6 +2,22 @@
   "expo": {
     "name": "ShieldX",
     "slug": "ShieldX",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "newArchEnabled": true,
+    "plugins": ["expo-font"],
+    "extra": {
+      "eas": {
+        "projectId": "77ac2250-d2b9-4b4c-83c0-47f5c0e8869c"
+      }
+    },
+    "owner": "nagraj_2005",
+    "android": {
+      "package": "com.nagraj_2005.ShieldX"
+    },
+    "updates": {
+      "enabled": true,
+      "fallbackToCacheTimeout": 0,
+      "checkAutomatically": "ON_LOAD"
+    }
   }
 }

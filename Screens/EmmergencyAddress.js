@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   View,
   Text,
@@ -6,21 +6,21 @@ import {
   TouchableOpacity,
   Alert,
   StyleSheet,
+  ActivityIndicator,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Dropdown } from "react-native-element-dropdown";
-import { useNavigation } from "@react-navigation/native";
+import axios from "axios";
+import { AI_URL , AUTH_URL } from '../constants/api';
 
-const API_URL = "http://192.168.124.74:3002/emergency-address";
-
-export default function EmergencyAddress() {
+export default function EmergencyAddress({ navigation }) {
   const [addressType, setAddressType] = useState("Home");
   const [address, setAddress] = useState("");
-  const [latitude, setLatitude] = useState("");
-  const [longitude, setLongitude] = useState("");
-  const [userId, setUserId] = useState("");
   const [isFocus, setIsFocus] = useState(false);
-  const navigation = useNavigation();
+  const [isLoading, setIsLoading] = useState(false);
 
   const addressOptions = [
     { label: "Home", value: "Home" },
@@ -29,126 +29,179 @@ export default function EmergencyAddress() {
     { label: "Friend", value: "Friend" },
   ];
 
-  useEffect(() => {
-    const getUserData = async () => {
-      try {
-        const userData = await AsyncStorage.getItem("userDetails");
-        if (userData) {
-          const parsedData = JSON.parse(userData);
-          setUserId(parsedData.id);
-        } else {
-          console.log("No user details found");
-          navigation.navigate("login");
-        }
-      } catch (error) {
-        console.error("Error fetching user ID:", error);
-        navigation.navigate("login");
-      }
-    };
-
-    const getStoredAddress = async () => {
-      try {
-        const savedAddress = await AsyncStorage.getItem("emergencyAddress");
-        if (savedAddress) {
-          const parsedAddress = JSON.parse(savedAddress);
-          setAddress(parsedAddress.address);
-          setLatitude(parsedAddress.latitude);
-          setLongitude(parsedAddress.longitude);
-          setAddressType(parsedAddress.addressType);
-        }
-      } catch (error) {
-        console.error("Error retrieving stored address:", error);
-      }
-    };
-
-    getUserData();
-    getStoredAddress();
-  }, []);
-
   const saveAddress = async () => {
-    if (!address.trim() || !latitude.trim() || !longitude.trim()) {
-      Alert.alert("Error", "Please fill in all fields.");
-      return;
-    }
-    if (!userId) {
-      Alert.alert("Error", "User ID not found. Please log in again.");
+    if (!address.trim()) {
+      Alert.alert("Error", "Please enter a valid address");
       return;
     }
 
-    const newAddress = {
-      userId,
-      addressType,
-      address,
-      latitude: parseFloat(latitude),
-      longitude: parseFloat(longitude),
-    };
+    setIsLoading(true);
 
     try {
-      console.log("Sending request to API:", newAddress);
-      const response = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newAddress),
-      });
+      const token = await AsyncStorage.getItem("accessToken");
 
-      const responseText = await response.text();
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error("JSON Parsing Error:", parseError);
-        Alert.alert("Error", "Invalid server response.");
+      if (!token) {
+        Alert.alert("Authentication Error", "Please login again");
+        setIsLoading(false);
         return;
       }
 
+      const response = await fetch('https://shieldx-auth.onrender.com/emergency/address', {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          addressType,
+          address: address.trim(),
+        }),
+      });
+
+      const data = await response.json();
+
       if (response.ok) {
-        await AsyncStorage.setItem("emergencyAddress", JSON.stringify(newAddress));
         Alert.alert("Success", "Address saved successfully!");
+        setAddress("");
+        setAddressType("Home");
       } else {
-        Alert.alert("Error", data.error || "Failed to save address.");
+        throw new Error(data.message || "Failed to save address");
       }
     } catch (error) {
-      console.error("Network Error:", error);
-      Alert.alert("Error", "Could not connect to server.");
+      console.error("Save address error:", error);
+      Alert.alert("Error", error.message || "An unexpected error occurred.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Emergency Address</Text>
-      <Dropdown
-        data={addressOptions}
-        labelField="label"
-        valueField="value"
-        value={addressType}
-        onChange={(item) => setAddressType(item.value)}
-        style={[styles.dropdown, isFocus && { borderColor: "#DC2626" }]}
-        placeholder={!isFocus ? "Select Address Type" : "..."}
-        selectedTextStyle={styles.selectedText}
-        onFocus={() => setIsFocus(true)}
-        onBlur={() => setIsFocus(false)}
-      />
-      <TextInput style={styles.input} placeholder="Enter Address" value={address} onChangeText={setAddress} />
-      <TextInput style={styles.input} placeholder="Enter Latitude" value={latitude} onChangeText={setLatitude} keyboardType="numeric" />
-      <TextInput style={styles.input} placeholder="Enter Longitude" value={longitude} onChangeText={setLongitude} keyboardType="numeric" />
-      <TouchableOpacity style={styles.saveButton} onPress={saveAddress}>
-        <Text style={styles.saveButtonText}>Save Address</Text>
-      </TouchableOpacity>
-      <TouchableOpacity style={styles.contactButton} onPress={() => navigation.navigate("EmergencyContacts")}>
-        <Text style={styles.contactButtonText}>Emergency Contacts</Text>
-      </TouchableOpacity>
-    </View>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      <ScrollView contentContainerStyle={styles.scrollContainer}>
+        <View style={styles.inner}>
+          <Text style={styles.title}>Emergency Address</Text>
+
+          <Dropdown
+            style={[styles.dropdown, isFocus && { borderColor: "#1E90FF" }]}
+            data={addressOptions}
+            labelField="label"
+            valueField="value"
+            value={addressType}
+            onChange={(item) => setAddressType(item.value)}
+            placeholder={!isFocus ? "Select Address Type" : "..."}
+            selectedTextStyle={styles.selectedText}
+            onFocus={() => setIsFocus(true)}
+            onBlur={() => setIsFocus(false)}
+            disable={isLoading}
+          />
+
+          <TextInput
+            style={styles.input}
+            placeholder="Enter Address"
+            value={address}
+            onChangeText={setAddress}
+            editable={!isLoading}
+            multiline
+          />
+
+          <TouchableOpacity
+            style={[styles.saveButton, isLoading && styles.disabledButton]}
+            onPress={saveAddress}
+            disabled={isLoading}
+          >
+            {isLoading ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.saveButtonText}>Save Address</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.homeButton}
+            onPress={() => navigation.navigate("Security")}
+          >
+            <Text style={styles.homeButtonText}>🏠 Go to Home</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#ededec", padding: 25 },
-  title: { fontSize: 30, fontWeight: "bold", textAlign: "center", marginVertical: 40, color: "#DC2626" },
-  dropdown: { borderWidth: 1, fontSize: 22, width: "100%", padding: 15, borderColor: "#ffffff", height: 48, borderRadius: 35, backgroundColor: "#fafafa", marginBottom: 15 },
-  selectedText: { fontSize: 16, color: "#000" },
-  input: { fontSize: 18, height: 50, borderWidth: 1, borderRadius: 10, padding: 10, marginBottom: 15, backgroundColor: "#fafafa" },
-  saveButton: { backgroundColor: "#DC2626", padding: 12, borderRadius: 10, alignItems: "center", width: "50%", alignSelf: "center", marginVertical: 10 },
-  saveButtonText: { color: "#fff", fontSize: 20, fontWeight: "bold" },
-  contactButton: { backgroundColor: "#1D4ED8", padding: 12, borderRadius: 10, alignItems: "center", width: "60%", alignSelf: "center", marginTop: 10 },
-  contactButtonText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
+  scrollContainer: {
+    flexGrow: 1,
+    backgroundColor: "#F3F4F6",
+    padding: 20,
+    justifyContent: "center",
+  },
+  inner: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  title: {
+    fontSize: 26,
+    fontWeight: "bold",
+    textAlign: "center",
+    marginBottom: 25,
+    color: "#1E90FF",
+  },
+  dropdown: {
+    borderWidth: 1,
+    padding: 15,
+    borderColor: "#ddd",
+    borderRadius: 25,
+    backgroundColor: "#fff",
+    marginBottom: 15,
+    fontSize: 16,
+  },
+  selectedText: {
+    fontSize: 16,
+    color: "#333",
+  },
+  input: {
+    borderWidth: 1,
+    padding: 15,
+    borderColor: "#ddd",
+    borderRadius: 20,
+    backgroundColor: "#fff",
+    marginBottom: 20,
+    fontSize: 16,
+    minHeight: 100,
+    textAlignVertical: "top",
+  },
+  saveButton: {
+    backgroundColor: "#1E90FF",
+    padding: 15,
+    borderRadius: 30,
+    alignSelf: "center",
+    width: "80%",
+    marginBottom: 15,
+  },
+  saveButtonText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  disabledButton: {
+    opacity: 0.6,
+  },
+  homeButton: {
+    backgroundColor: "#1E90FF",
+    padding: 15,
+    borderRadius: 30,
+    alignSelf: "center",
+    width: "80%",
+  },
+  homeButtonText: {
+    color: "#fff",
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
 });

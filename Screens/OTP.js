@@ -1,9 +1,20 @@
-import React, { useRef, useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet,Image } from "react-native";
+import React, { useRef, useState ,useEffect} from "react";
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+  Alert,
+} from "react-native";
+import { AI_URL , AUTH_URL } from '../constants/api';
 
-const OTP = ({ navigation }) => {
+const OTP = ({ route, navigation }) => {
+  const { email } = route.params; // Get email passed from previous screen
   const [otp, setOtp] = useState(["", "", "", "", ""]);
   const [verified, setVerified] = useState(false);
+  const [loading, setLoading] = useState(false);
   const inputs = [useRef(), useRef(), useRef(), useRef(), useRef()];
 
   const handleChange = (text, idx) => {
@@ -11,27 +22,56 @@ const OTP = ({ navigation }) => {
       const newOtp = [...otp];
       newOtp[idx] = text;
       setOtp(newOtp);
-      if (text && idx < 4) {
-        inputs[idx + 1].current.focus();
-      }
-      if (!text && idx > 0) {
-        inputs[idx - 1].current.focus();
-      }
+      if (text && idx < 4) inputs[idx + 1].current.focus();
+      if (!text && idx > 0) inputs[idx - 1].current.focus();
     }
   };
 
-  const handleVerify = () => {
-   navigation.navigate("Reset");
+  useEffect(()=>{
+  console.log("email :",email)
+  },[])
+
+  const handleVerify = async () => {
+    const fullOtp = otp.join("");
+
+    if (fullOtp.length !== 5) {
+      Alert.alert("Validation Error", "Please enter all 5 digits of the OTP.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`http://192.168.145.21:3001/auth/forgot/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, otp: fullOtp }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setVerified(true);
+        Alert.alert("Success", "OTP verified successfully!");
+        navigation.navigate("Reset", { email  ,otp: fullOtp}); // Pass email to Reset screen
+      } else {
+        Alert.alert("Error", data.message || "OTP verification failed.");
+      }
+    } catch (err) {
+      console.error("OTP verify error:", err);
+      Alert.alert("Error", "An error occurred. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <View style={styles.container}>
-         <View style={{ flexDirection: "column", marginBottom: 20 }}>
-            <Image
-              source={require("../assets/verify.png")}
-              style={{ width: 380, height: 380, resizeMode: "contain" }}
-            />
-          </View>
+      <View style={{ flexDirection: "column", marginBottom: 20 }}>
+        <Image
+          source={require("../assets/verify.png")}
+          style={{ width: 380, height: 380, resizeMode: "contain" }}
+        />
+      </View>
       <Text style={styles.title}>OTP Verification</Text>
       <Text style={styles.subtitle}>Enter the 5-digit code sent to your email</Text>
       <View style={styles.otpContainer}>
@@ -51,12 +91,12 @@ const OTP = ({ navigation }) => {
         ))}
       </View>
       <TouchableOpacity
-        style={[styles.button, verified && { backgroundColor: "#999" }]}
+        style={[styles.button, loading && { backgroundColor: "#999" }]}
         onPress={handleVerify}
-        disabled={verified}
+        disabled={loading}
       >
         <Text style={styles.buttonText}>
-          {verified ? "Verified ✅" : "Verify"}
+          {loading ? "Verifying..." : verified ? "Verified ✅" : "Verify"}
         </Text>
       </TouchableOpacity>
       {verified && (
@@ -69,12 +109,12 @@ const OTP = ({ navigation }) => {
 export default OTP;
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: "#fff",
-        paddingHorizontal: 20,
-        paddingTop: 20, // Add this line to reduce top space
-      },
+  container: {
+    flex: 1,
+    backgroundColor: "#fff",
+    paddingHorizontal: 20,
+    paddingTop: 20,
+  },
   title: {
     fontSize: 26,
     color: "#1E90FF",

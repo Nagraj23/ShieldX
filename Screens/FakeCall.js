@@ -1,245 +1,237 @@
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  StatusBar,
-  SafeAreaView,
-  Image,
-  Dimensions,
-  Alert,
-  Vibration,
-  Platform,
-  Animated,
-} from "react-native";
-import React, { useEffect, useRef } from "react";
-import Icon from "react-native-vector-icons/MaterialCommunityIcons";
-// import Sound from "react-native-sound";
+import React, { useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Vibration, ImageBackground, Animated, Easing } from 'react-native';
+import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
+import { Feather, MaterialIcons } from '@expo/vector-icons';
 
-const { width, height } = Dimensions.get("window");
-
-export default function CallingScreen() {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  const acceptAnim = useRef(new Animated.Value(0)).current;
-const declineAnim = useRef(new Animated.Value(0)).current;
-
-useEffect(() => {
-  // Button bounce animation
-  const createBounce = (animatedValue) =>
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(animatedValue, {
-          toValue: -10,
-          duration: 500,
-          useNativeDriver: true,
-        }),
-        Animated.timing(animatedValue, {
-          toValue: 0,
-          duration: 500,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-
-  createBounce(acceptAnim).start();
-  createBounce(declineAnim).start();
-}, []);
+export default function FakeCall() {
+  const soundRef = useRef(null);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    // Pulse animation for the profile picture
+    const setup = async () => {
+      try {
+        const { granted } = await Audio.requestPermissionsAsync();
+        if (!granted) {
+          console.warn("🚫 Audio permission not granted");
+          return;
+        }
+
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: false,
+          interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+          interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+          playsInSilentModeIOS: true,
+          staysActiveInBackground: false,
+          shouldDuckAndroid: true,
+        });
+
+        await playRingtone();
+        Vibration.vibrate([500, 500, 500], true);
+        startPulseAnimation();
+      } catch (e) {
+        console.error("❌ Error in setup:", e);
+      }
+    };
+
+    setup();
+
+    return () => {
+      stopRingtone();
+      Vibration.cancel();
+      pulseAnim.stopAnimation();
+      pulseAnim.setValue(1);
+    };
+  }, []);
+
+  const startPulseAnimation = () => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(scaleAnim, {
+        Animated.timing(pulseAnim, {
           toValue: 1.05,
           duration: 1000,
+          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
-        Animated.timing(scaleAnim, {
+        Animated.timing(pulseAnim, {
           toValue: 1,
           duration: 1000,
+          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
       ])
     ).start();
-
-    // Vibration pattern
-    Vibration.vibrate([1000, 500, 1000], true);
-
-    // Optional: play fake ringtone
-    // let ringtone;
-    // if (Platform.OS === "android" || Platform.OS === "ios") {
-    //   ringtone = new Sound("ringtone.mp3", Sound.MAIN_BUNDLE, (error) => {
-    //     if (!error) {
-    //       ringtone.setNumberOfLoops(-1);
-    //       ringtone.play();
-    //     }
-    //   });
-    // }
-
-    // return () => {
-    //   Vibration.cancel();
-    //   if (ringtone) {
-    //     ringtone.stop();
-    //     ringtone.release();
-    //   }
-    // };
-  }, []);
-
-  const handleAccept = () => {
-    Alert.alert("Call Accepted", "Connecting...");
   };
 
-  const handleDecline = () => {
-    Alert.alert("Call Declined", "You declined the call.");
+  const playRingtone = async () => {
+    try {
+      const { sound } = await Audio.Sound.createAsync(
+        require('../assets/mi_pure.mp3'), // 👈 make sure this exists!
+        {
+          shouldPlay: true,
+          isLooping: true,
+        }
+      );
+      soundRef.current = sound;
+      await sound.playAsync();
+    } catch (err) {
+      console.error("🔥 Error playing ringtone:", err);
+    }
   };
 
-  const handleMessage = () => {
-    Alert.alert("Send Message", "Opening message options...");
+  const stopRingtone = async () => {
+    try {
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+    } catch (err) {
+      console.error("🛑 Error stopping ringtone:", err);
+    }
+  };
+
+  const handleAccept = async () => {
+    await stopRingtone();
+    Vibration.cancel();
+    alert('📞 Call accepted! (You can now navigate to the active call UI)');
+  };
+
+  const handleDecline = async () => {
+    await stopRingtone();
+    Vibration.cancel();
+    alert('❌ Call declined!');
+  };
+
+  const animatedStyle = {
+    transform: [{ scale: pulseAnim }],
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.header}>
-          <Text style={styles.incomingText}>Incoming call</Text>
+    <ImageBackground style={styles.container} resizeMode="cover">
+      <View style={styles.overlay} />
+
+      <View style={styles.content}>
+        <Animated.View style={[styles.callerInfo, animatedStyle]}>
+          <View style={styles.avatarPlaceholder}>
+            <Text style={styles.avatarText}>JD</Text>
+          </View>
+          <Text style={styles.callerName}>John Doe</Text>
+          <Text style={styles.callerNumber}>(+91) 98765 43210</Text>
+          <Text style={styles.callStatus}>Mobile</Text>
+        </Animated.View>
+
+        <View style={styles.actionButtonsContainer}>
+          <TouchableOpacity style={styles.actionButton}>
+            <Feather name="speaker" size={28} color="white" />
+            <Text style={styles.actionButtonText}>Speaker</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton}>
+            <Feather name="mic-off" size={28} color="white" />
+            <Text style={styles.actionButtonText}>Mute</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionButton}>
+            <MaterialIcons name="dialpad" size={28} color="white" />
+            <Text style={styles.actionButtonText}>Keypad</Text>
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.contactInfo}>
-          <Text style={styles.nameText}>Dad</Text>
-          <Text style={styles.phoneText}>+91 7620101655</Text>
+        <View style={styles.bottomButtons}>
+          <TouchableOpacity onPress={handleDecline} style={[styles.callButton, styles.declineButton]}>
+            <MaterialIcons name="call-end" size={32} color="white" />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleAccept} style={[styles.callButton, styles.acceptButton]}>
+            <Feather name="phone" size={32} color="white" />
+          </TouchableOpacity>
         </View>
-
-        <View style={styles.profileContainer}>
-          <Animated.Image
-            source={{ uri: "https://i.pravatar.cc/100" }}
-            style={[
-              styles.profilePicture,
-              { transform: [{ scale: scaleAnim }] },
-            ]}
-          />
-        </View>
-
-        <View style={styles.actionButtonsRow}>
-          <Animated.View style={{ transform: [{ translateY: declineAnim }] }}>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.declineButton]}
-              activeOpacity={0.8}
-              onPress={handleDecline}
-            >
-              <Icon name="phone-hangup" size={32} color="#fff" />
-            </TouchableOpacity>
-          </Animated.View>
-          <Animated.View style={{ transform: [{ translateY: acceptAnim }] }}>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.acceptButton]}
-              activeOpacity={0.8}
-              onPress={handleAccept}
-            >
-              <Icon name="phone" size={32} color="#fff" />
-            </TouchableOpacity>
-          </Animated.View>
-        </View>
-
-        <TouchableOpacity style={styles.messageOption} onPress={handleMessage}>
-          <Text style={styles.messageText}>Message</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    </View>
+      </View>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "white",
-    marginTop:50,
+    backgroundColor: '#000',
+    justifyContent: 'flex-end',
   },
-  safeArea: {
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  content: {
     flex: 1,
-    paddingTop: StatusBar.currentHeight || 0,
-    justifyContent: "flex-start",
-    alignItems: "center",
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingBottom: 50,
+    paddingTop: 50,
   },
-  header: {
-    alignItems: "center",
-    paddingTop: 40,
-    marginBottom: 10,
+  callerInfo: {
+    alignItems: 'center',
+    marginTop: 50,
   },
-  incomingText: {
-    color: "rgba(0,0,0,0.18)",
-    fontSize: 22,
-    fontWeight: "bold",
-    letterSpacing: 1,
-  },
-  contactInfo: {
-    alignItems: "center",
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  nameText: {
-    color: "#000",
-    fontSize: 36,
-    fontWeight: "bold",
-    fontFamily: Platform.OS === "ios" ? "Snell Roundhand" : undefined,
-    marginBottom: 2,
-  },
-  phoneText: {
-    color: "#000",
-    fontSize: 20,
-    letterSpacing: 1,
-  },
-  profileContainer: {
-    alignItems: "center",
-    marginTop: 18,
-    marginBottom: 40,
-  },
-  profilePicture: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    backgroundColor: "#e0e0e0",
-    borderWidth: 2,
-    borderColor: "#fff",
-  },
-  actionButtonsRow: {
-    flexDirection: "row",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 80,
+  avatarPlaceholder: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: '#333',
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 20,
-    width: "100%",
-    gap: 40,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  avatarText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: 'white',
+  },
+  callerName: {
+    fontSize: 40,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 5,
+  },
+  callerNumber: {
+    fontSize: 22,
+    color: 'rgba(255,255,255,0.7)',
+    marginBottom: 10,
+  },
+  callStatus: {
+    fontSize: 18,
+    color: 'rgba(255,255,255,0.6)',
+  },
+  actionButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '80%',
+    marginBottom: 80,
   },
   actionButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    justifyContent: "center",
-    alignItems: "center",
-    marginHorizontal: 20,
-    elevation: 6,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
+    alignItems: 'center',
+    padding: 15,
   },
-  acceptButton: {
-    backgroundColor: "#4CAF50",
+  actionButtonText: {
+    color: 'white',
+    fontSize: 14,
+    marginTop: 8,
+  },
+  bottomButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '80%',
+  },
+  callButton: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginHorizontal: 30,
   },
   declineButton: {
-    backgroundColor: "#F44336",
+    backgroundColor: '#FF3B30',
   },
-  messageOption: {
-    alignSelf: "center",
-    marginTop: 10,
-    marginBottom: 10,
-    padding: 8,
-  },
-  messageText: {
-    color: "#bdbdbd",
-    fontSize: 16,
-    fontWeight: "500",
-    letterSpacing: 1,
+  acceptButton: {
+    backgroundColor: '#34C759',
   },
 });

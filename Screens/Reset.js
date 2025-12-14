@@ -1,7 +1,54 @@
-import React from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet } from "react-native";
+import React, { useState,useEffect } from "react";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { AI_URL , AUTH_URL } from '../constants/api';
 
-const ResetPassword = ({ navigation }) => {
+const ResetPassword = ({ route, navigation }) => {
+  const { email, otp: otp } = route.params; // Get email passed from OTP screen
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+ useEffect(()=>{
+  console.log("email :",email)
+  console.log("otp ",otp)
+  },[])
+
+  const handleReset = async () => {
+    if (!newPassword || !confirmPassword) {
+      Alert.alert("Error", "Please fill in all fields.");
+      return;
+    }
+
+
+    if (newPassword !== confirmPassword) {
+      Alert.alert("Error", "Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch(`http://192.168.145.21:3001/auth/forgot/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email,  otp: otp,newPassword }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        Alert.alert("Success", "Password has been reset!");
+        navigation.navigate("Login");
+      } else {
+        Alert.alert("Error", data.message || "Failed to reset password.");
+      }
+    } catch (error) {
+      console.error("Reset password error:", error);
+      Alert.alert("Error", "Something went wrong. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.successText}>Account recovered successfully</Text>
@@ -12,6 +59,8 @@ const ResetPassword = ({ navigation }) => {
         placeholder="New Password"
         secureTextEntry
         placeholderTextColor="#999"
+        value={newPassword}
+        onChangeText={setNewPassword}
       />
 
       <Text style={styles.label}>Confirm Password</Text>
@@ -20,13 +69,18 @@ const ResetPassword = ({ navigation }) => {
         placeholder="Confirm Password"
         secureTextEntry
         placeholderTextColor="#999"
+        value={confirmPassword}
+        onChangeText={setConfirmPassword}
       />
 
       <TouchableOpacity
-        style={styles.button}
-        onPress={() => navigation.navigate("Login")}
+        style={[styles.button, loading && { backgroundColor: "#999" }]}
+        onPress={handleReset}
+        disabled={loading}
       >
-        <Text style={styles.buttonText}>Reset Password</Text>
+        <Text style={styles.buttonText}>
+          {loading ? "Resetting..." : "Reset Password"}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -75,4 +129,3 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 });
-

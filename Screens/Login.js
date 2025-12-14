@@ -1,9 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
   Image,
-  Button,
   StatusBar,
   StyleSheet,
   KeyboardAvoidingView,
@@ -15,49 +14,106 @@ import {
   Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Checkbox from "./Checkbox";
+import { AUTH_URL } from '../constants/api';
 
-export default function Login({ navigation }) {
+export default function Login({ navigation,setIsSignUp }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
+
+  useEffect(() => {
+    const loadCredentials = async () => {
+      const savedEmail = await AsyncStorage.getItem("savedEmail");
+      const savedPassword = await AsyncStorage.getItem("savedPassword");
+      const savedRememberMe = await AsyncStorage.getItem("rememberMe");
+
+      if (savedRememberMe === "true") {
+        setEmail(savedEmail || "");
+        setPassword(savedPassword || "");
+        setRememberMe(true);
+      }
+    };
+    loadCredentials();
+  }, []);
+
+
 
   const handleLogin = async () => {
-    // if (!email.trim() || !password.trim()) {
-    //   Alert.alert("Error", "Email and Password fields cannot be empty");
-    //   return;
-    // }
+    if (!email.trim() || !password.trim()) {
+      Alert.alert("Error", "Email and Password fields cannot be empty");
+      return;
+    }
 
-    // try {
-    //   const response = await fetch("http://192.168.124.241:3002/login", {
-    //     method: "POST",
-    //     headers: {
-    //       "Content-Type": "application/json",
-    //     },
-    //     body: JSON.stringify({ email, password }),
-    //   });
+    try {
+      const response = await fetch('http://192.168.145.21:3001/auth/login', {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
 
-    //   const data = await response.json();
-    //   // console.log(data)
+      const data = await response.json();
+      console.log("Login API Response Data:", data);
 
-    //   if (response.ok) {
-    //     const { token, userData } = data;
+      if (response.ok) {
+        // --- FIX START ---
+        // Destructure both accessToken and refreshToken from the response data.
+        // Assuming your backend /auth/login endpoint sends refreshToken.
+        const { accessToken, refreshToken, userData } = data;
 
-    //     // Store token and login status
-    //     await AsyncStorage.setItem("authToken", token);
-    //     await AsyncStorage.setItem("userDetails", JSON.stringify(userData));
-    //     await AsyncStorage.setItem("isLoggedin", "true");
-    //     console.log(AsyncStorage.getItem("authToken"));
-    //     ToastAndroid.show("Login successful", ToastAndroid.LONG);
+        if (!accessToken) {
+          Alert.alert("Login Failed", "Access token missing in response");
+          return;
+        }
 
-    //     // Navigate to Home
-    //     navigation.replace("Home");
-    //   } else {
-    //     Alert.alert("Login Failed", data.error || "Invalid email or password");
-    //   }
-    // } catch (error) {
-    //   console.log(error.message);
-    //   Alert.alert("Login Failed", "Unable to connect. Please try again.");
-    // }
-    navigation.navigate("MainTabs");
+        // Store both accessToken and refreshToken in AsyncStorage
+        await AsyncStorage.setItem("accessToken", accessToken);
+        if (refreshToken) { // Only save if refreshToken is provided by the backend
+          await AsyncStorage.setItem("refreshToken", refreshToken);
+        }
+        // --- FIX END ---
+
+        if (userData) {
+          await AsyncStorage.setItem("userDetails", JSON.stringify(userData));
+          if (userData?.id) {
+            await AsyncStorage.setItem("userId", userData.id);
+            console.log("User ID Stored:", userData.id);
+          } else {
+            console.warn("❌ No user ID found in userData:", userData);
+          }
+          console.log("User Data Stored:", userData);
+        }
+        await AsyncStorage.setItem("isLoggedin", "true");
+
+        const emailToSave = userData?.email || email;
+        console.log('Saving email to AsyncStorage:', emailToSave);
+        await AsyncStorage.setItem("savedEmail", emailToSave);
+
+        if (rememberMe) {
+          await AsyncStorage.setItem("savedPassword", password);
+          await AsyncStorage.setItem("rememberMe", "true");
+        } else {
+          await AsyncStorage.removeItem("savedEmail");
+          await AsyncStorage.removeItem("savedPassword");
+          await AsyncStorage.setItem("rememberMe", "false");
+        }
+
+        // Log the tokens from AsyncStorage after saving for debugging
+        console.log("Access Token from AsyncStorage after save:", await AsyncStorage.getItem("accessToken"));
+        console.log("Refresh Token from AsyncStorage after save:", await AsyncStorage.getItem("refreshToken")); // Added for debugging
+
+        ToastAndroid.show("Login successful", ToastAndroid.LONG);
+
+        navigation.navigate("Initial");
+      } else {
+        Alert.alert("Login Failed", data.message || "Invalid email or password");
+      }
+    } catch (error) {
+      console.error("Login Error:", error.message);
+      Alert.alert("Login Failed", "Unable to connect. Please try again.");
+    }
   };
 
   return (
@@ -70,10 +126,10 @@ export default function Login({ navigation }) {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.card}>
-          <View style={{ flexDirection: "column", marginBottom: 20 }}>
+          <View style={styles.imageContainer}>
             <Image
               source={require("../assets/login.png")}
-              style={{ width: 380, height: 380, resizeMode: "contain" }}
+              style={styles.loginImage}
             />
           </View>
 
@@ -96,18 +152,21 @@ export default function Login({ navigation }) {
             />
           </View>
 
-          <TouchableOpacity activeOpacity={0.9} onPress={()=>navigation.navigate('Email')}>
-            <Text
-              style={{
-                fontSize:18,
-                color: "blue",
-                marginBottom: 20,
-                alignSelf: "flex-end",
-              }}
+          <View style={styles.rememberMeContainer}>
+            <Checkbox
+              value={rememberMe}
+              onValueChange={(newValue) => setRememberMe(newValue)}
+              label="Remember Me"
+            />
+            <TouchableOpacity
+              activeOpacity={0.9}
+              onPress={() => navigation.navigate("Email")}
             >
-              Forgot Password?
-            </Text>
-          </TouchableOpacity>
+              <Text style={styles.forgotPasswordText}>
+                Forgot Password?
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           <TouchableOpacity
             style={styles.button}
@@ -117,17 +176,13 @@ export default function Login({ navigation }) {
             <Text style={styles.buttonText}>Login</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.signupButton}
-            onPress={() => navigation.navigate("Register")}
-            activeOpacity={0.9}
-          >
-            <Text style={styles.signupText}> don't have Account ? Sign Up</Text>
-          </TouchableOpacity>
+         <TouchableOpacity
+           onPress={() => setIsSignUp(true)}
+         >
+           <Text>Don't have an account? Register</Text>
+         </TouchableOpacity>
         </View>
       </ScrollView>
-
-      <StatusBar style="auto" />
     </KeyboardAvoidingView>
   );
 }
@@ -136,6 +191,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#fff",
+    paddingTop: 0,
   },
   scrollContainer: {
     flexGrow: 1,
@@ -146,20 +202,20 @@ const styles = StyleSheet.create({
     width: "95%",
     alignItems: "center",
   },
-  name: {
-    fontSize: 22,
-    fontWeight: "bold",
-    fontFamily: "notoserif",
+  imageContainer: {
+    flexDirection: "column",
+    marginBottom: 20,
+    marginTop: -50,
+  },
+  loginImage: {
+    width: 280,
+    height: 280,
+    resizeMode: "contain",
   },
   inp: {
     width: "85%",
   },
   user: {
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    // Android Shadow
     elevation: 15,
     borderWidth: 1,
     width: "100%",
@@ -175,10 +231,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#1E90FF",
     width: "85%",
     padding: 15,
-    borderRadius: 8,
+    borderRadius: 35,
     alignItems: "center",
     marginBottom: 15,
-    borderRadius: 35,
   },
   buttonText: {
     color: "#ffffff",
@@ -197,15 +252,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     marginTop: 10,
   },
-  icon: {
-    width: 45,
-    height: 45,
-    marginRight: 10,
-  },
-  socials: {
+  rememberMeContainer: {
     flexDirection: "row",
-    justifyContent: "center",
     alignItems: "center",
-    marginTop: 15,
+    justifyContent: "space-between",
+    width: "85%",
+    marginBottom: 10,
+  },
+  rememberMeText: {
+    marginLeft: 8,
+    fontSize: 16,
+  },
+  forgotPasswordText: {
+    fontSize: 18,
+    color: "blue",
+    marginBottom: 20,
+    alignSelf: "flex-end",
   },
 });

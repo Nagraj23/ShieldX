@@ -1,393 +1,340 @@
-import React, { useState, useEffect } from 'react';
+// 🌍 imports
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  FlatList,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
-} from 'react-native';
-import { Ionicons, MaterialIcons } from '@expo/vector-icons';
-import MapView, { Polyline } from 'react-native-maps';
+  Dimensions,
+  Alert,
+} from "react-native";
+import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import MapView, { Polyline } from "react-native-maps";
+import * as Location from "expo-location";
+import * as TaskManager from "expo-task-manager";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import uuid from "react-native-uuid";
+import { AI_URL } from "../constants/api";
 
-const GOOGLE_PLACES_API_KEY = 'YOUR_GOOGLE_PLACES_API_KEY'; // Replace with your API key
+const LOCATION_TASK_NAME = "BACKGROUND_LOCATION_TASK";
+const LOCATION_UPDATE_INTERVAL = 5 * 60 * 1000;
+let lastSent = 0;
 
-export default function RouteUpdate({ navigation }) {
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [fromCoords, setFromCoords] = useState(null);
-  const [toCoords, setToCoords] = useState(null);
-  const [routePreview, setRoutePreview] = useState({});
+const { width, height } = Dimensions.get("window");
+const LATITUDE_DELTA = 0.0922;
+const LONGITUDE_DELTA = LATITUDE_DELTA * (width / height);
+
+// 🛠️ BACKGROUND TASK SETUP
+if (!TaskManager.isTaskDefined(LOCATION_TASK_NAME)) {
+  TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
+    if (error) {
+      console.error("❌ Background task error", error);
+      return;
+    }
+
+    if (!data) return;
+
+    const now = Date.now();
+    if (now - lastSent < LOCATION_UPDATE_INTERVAL) return;
+    lastSent = now;
+
+    try {
+      const { locations } = data;
+      const location = locations?.[0];
+      const userId = await AsyncStorage.getItem("internalUserId");
+      const journeyId = await AsyncStorage.getItem("currentJourneyId");
+      const contactData = await AsyncStorage.getItem("internalEmergencyContact");
+
+      let emergencyContacts = [];
+      try {
+        const parsed = JSON.parse(contactData);
+        emergencyContacts = Array.isArray(parsed) ? parsed : [parsed];
+      } catch {
+        if (contactData) emergencyContacts = [contactData];
+      }
+
+      emergencyContacts = emergencyContacts.filter(
+        (num) => typeof num === "string" && /^\d{10,14}$/.test(num)
+      );
+
+      if (!location || !userId || !journeyId || emergencyContacts.length === 0) return;
+
+      await fetch(`${AI_URL}/api/location/update_location`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userId,
+          lat: location.coords.latitude,
+          lng: location.coords.longitude,
+          type: "route_monitor",
+          emergency_contacts: emergencyContacts,
+          journey_id: journeyId,
+        }),
+      });
+
+      console.log("✅ Background location sent at", new Date(now).toLocaleTimeString());
+    } catch (err) {
+      console.error("❌ Background send error:", err);
+    }
+  });
+}
+
+// 🚀 MAIN COMPONENT
+export default function RouteUpdate() {
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [allRoutesCoordinates, setAllRoutesCoordinates] = useState([]);
   const [userLocation, setUserLocation] = useState(null);
+  const [loadingTracking, setLoadingTracking] = useState(false);
+  const [isTracking, setIsTracking] = useState(false);
+
+  const mapRef = useRef(null);
+  const userIdRef = useRef(null);
 
   useEffect(() => {
     (async () => {
-      try {
-        let { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === "granted") {
-          let currentLocation = await Location.getCurrentPositionAsync({});
-          setUserLocation({
-            latitude: currentLocation.coords.latitude,
-            longitude: currentLocation.coords.longitude,
-          });
+      let id = await AsyncStorage.getItem("internalUserId");
+      if (!id) {
+        id = uuid.v4();
+        await AsyncStorage.setItem("internalUserId", id);
+      }
+      userIdRef.current = id;
+
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert("Permission denied", "Location permission is required.");
+        return;
+      }
+
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setUserLocation(loc.coords);
+
+      const isTrackingFlag = await AsyncStorage.getItem("isTracking");
+      if (isTrackingFlag !== "true") {
+        const tasks = await TaskManager.getRegisteredTasksAsync();
+        const registered = tasks.find(t => t.taskName === LOCATION_TASK_NAME);
+        if (registered) {
+          console.log("🧹 Stopping leftover background task");
+          await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
         }
-      } catch (e) {
-        // Ignore location error
       }
     })();
   }, []);
 
-  const fetchSuggestions = async (input) => {
-    if (!input) {
-      setSuggestions([]);
-      return;
-    }
-    setLoading(true);
+  const fetchCoords = async (address) => {
+    const GOOGLE_API_KEY = "AIzaSyC9wUqhLFroJbDWTuOwYhjw0OzpllfndNc";
     try {
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
-          input
-        )}&key=${GOOGLE_PLACES_API_KEY}&language=en&components=country:in`
+      const res = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${GOOGLE_API_KEY}`
       );
-      const data = await response.json();
-      if (data.status === 'OK') {
-        setSuggestions(data.predictions);
+      const data = await res.json();
+      if (data.results.length) {
+        const { lat, lng } = data.results[0].geometry.location;
+        return { latitude: lat, longitude: lng };
       } else {
-        setSuggestions([]);
+        Alert.alert("Error", "Invalid address: " + address);
+        return null;
       }
-    } catch (error) {
-      setSuggestions([]);
-    } finally {
-      setLoading(false);
+    } catch (err) {
+      console.error("Geocoding error:", err);
+      Alert.alert("Error", "Could not fetch coordinates");
+      return null;
     }
   };
 
-  const handleToChange = (text) => {
-    setTo(text);
-    fetchSuggestions(text);
-  };
-
-  const handleSuggestionPress = (suggestion) => {
-    setTo(suggestion.description);
-    setSuggestions([]);
-  };
-
-  const fetchCoords = async (address, setter) => {
-    if (!address) return;
-    try {
-      const resp = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(
-          address
-        )}&key=${GOOGLE_PLACES_API_KEY}`
-      );
-      const data = await resp.json();
-      if (data.status === 'OK' && data.results.length > 0) {
-        const loc = data.results[0].geometry.location;
-        setter({ latitude: loc.lat, longitude: loc.lng });
-      }
-    } catch (e) {
-      console.warn('Geocode error:', e);
-    }
-  };
-
-  useEffect(() => {
-    fetchCoords(from, setFromCoords);
-  }, [from]);
-
-  useEffect(() => {
-    fetchCoords(to, setToCoords);
-  }, [to]);
-
-  useEffect(() => {
-    const fetchAllPreviews = async () => {
-      if (fromCoords && toCoords && suggestions.length > 0) {
-        for (const item of suggestions) {
-          if (!routePreview[item.place_id]) {
-            await fetchRoutePreview(fromCoords, toCoords, item.place_id);
-          }
-        }
-      }
-    };
-    fetchAllPreviews();
-  }, [suggestions, fromCoords, toCoords]);
-
-  const fetchRoutePreview = async (fromC, toC, placeId) => {
-    if (!fromC || !toC) return;
-    try {
-      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${fromC.latitude},${fromC.longitude}&destination=${toC.latitude},${toC.longitude}&key=${GOOGLE_PLACES_API_KEY}`;
-      const resp = await fetch(url);
-      const data = await resp.json();
-      if (data.routes && data.routes.length) {
-        const points = decodePolyline(data.routes[0].overview_polyline.points);
-        setRoutePreview((prev) => ({ ...prev, [placeId]: points }));
-      }
-    } catch (e) {
-      console.warn('Route fetch error:', e);
-    }
-  };
-
-  function decodePolyline(encoded) {
-    let points = [];
-    let index = 0,
-      lat = 0,
-      lng = 0;
-
+  const decodePolyline = (encoded) => {
+    let points = [], index = 0, lat = 0, lng = 0;
     while (index < encoded.length) {
-      let b,
-        shift = 0,
-        result = 0;
+      let b, shift = 0, result = 0;
       do {
         b = encoded.charCodeAt(index++) - 63;
         result |= (b & 0x1f) << shift;
         shift += 5;
       } while (b >= 0x20);
-      let dlat = result & 1 ? ~(result >> 1) : result >> 1;
-      lat += dlat;
+      lat += result & 1 ? ~(result >> 1) : result >> 1;
 
-      shift = 0;
-      result = 0;
+      shift = result = 0;
       do {
         b = encoded.charCodeAt(index++) - 63;
         result |= (b & 0x1f) << shift;
         shift += 5;
       } while (b >= 0x20);
-      let dlng = result & 1 ? ~(result >> 1) : result >> 1;
-      lng += dlng;
+      lng += result & 1 ? ~(result >> 1) : result >> 1;
 
       points.push({ latitude: lat / 1e5, longitude: lng / 1e5 });
     }
     return points;
-  }
+  };
+
+  const fetchRoute = async (from, to) => {
+    const API = `https://maps.googleapis.com/maps/api/directions/json?origin=${from.latitude},${from.longitude}&destination=${to.latitude},${to.longitude}&mode=walking&alternatives=true&key=AIzaSyC9wUqhLFroJbDWTuOwYhjw0OzpllfndNc`;
+    try {
+      const res = await fetch(API);
+      const data = await res.json();
+      if (data.routes.length) {
+        const decoded = decodePolyline(data.routes[0].overview_polyline.points);
+        setAllRoutesCoordinates([decoded]);
+        mapRef.current?.fitToCoordinates(decoded, {
+          edgePadding: { top: 50, bottom: 50, left: 50, right: 50 },
+          animated: true,
+        });
+      }
+    } catch (err) {
+      console.error("Route error:", err);
+      Alert.alert("Error", "Could not fetch directions");
+    }
+  };
+
+  const handleStartJourney = async () => {
+    if (!from || !to) return Alert.alert("Missing info", "Enter both From and To");
+
+    setLoadingTracking(true);
+    try {
+      const fromC = await fetchCoords(from);
+      const toC = await fetchCoords(to);
+      if (!fromC || !toC) return;
+
+      await fetchRoute(fromC, toC);
+
+      const stored = await AsyncStorage.getItem("emergencyPhoneList");
+      const contacts = JSON.parse(stored || "[]");
+     const validContacts = contacts
+         .map((phone) => {
+           if (typeof phone === "number") phone = phone.toString();
+           if (typeof phone === "string") return phone.trim();
+           return null;
+         })
+         .filter((phone) => phone && /^\d{10,14}$/.test(phone));
+     console.log(validContacts)
+
+      if (validContacts.length === 0) {
+        return Alert.alert("Error", "No valid emergency contacts found!");
+      }
+
+      const res = await fetch('https://shieldx-back.onrender.com/api/share_route', {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          user_id: userIdRef.current,
+          start_lat: fromC.latitude,
+          start_lng: fromC.longitude,
+          end_lat: toC.latitude,
+          end_lng: toC.longitude,
+          emergency_contacts: validContacts,
+        }),
+      });
+
+      const data = await res.json();
+
+      await AsyncStorage.setItem("currentJourneyId", data.journey_id);
+      await AsyncStorage.setItem("internalEmergencyContact", JSON.stringify(validContacts));
+      await AsyncStorage.setItem("isTracking", "true");
+
+      await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
+        accuracy: Location.Accuracy.High,
+        timeInterval: LOCATION_UPDATE_INTERVAL,
+        deferredUpdatesInterval: LOCATION_UPDATE_INTERVAL,
+        distanceInterval: 0,
+        pausesUpdatesAutomatically: false,
+        showsBackgroundLocationIndicator: true,
+        foregroundService: {
+          notificationTitle: "Journey Tracker",
+          notificationBody: "Your location is updating every 5 mins.",
+        },
+      });
+
+      setIsTracking(true);
+    } catch (err) {
+      console.error("Start journey error:", err);
+      Alert.alert("Error", "Could not start tracking");
+    } finally {
+      setLoadingTracking(false);
+    }
+  };
+
+  const handleStopJourney = async () => {
+    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+    await AsyncStorage.multiRemove(["currentJourneyId", "internalEmergencyContact", "isTracking"]);
+    setIsTracking(false);
+  };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <View style={styles.inputCard}>
-        <View style={styles.inputRow}>
-          <Ionicons name="navigate" size={20} color="#888" style={styles.icon} />
-          <TextInput
-            style={styles.input}
-            value={from}
-            onChangeText={setFrom}
-            placeholder="From"
-            placeholderTextColor="#bbb"
-          />
-        </View>
-        <View style={styles.inputRow}>
-          <MaterialIcons name="place" size={20} color="#888" style={styles.icon} />
-          <TextInput
-            style={styles.input}
-            value={to}
-            onChangeText={handleToChange}
-            placeholder="To"
-            placeholderTextColor="#bbb"
-            autoFocus
-          />
-          <TouchableOpacity style={styles.addBtn} onPress={async () => {
-            if (fromCoords && toCoords) {
-              setLoading(true);
-              try {
-                const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${fromCoords.latitude},${fromCoords.longitude}&destination=${toCoords.latitude},${toCoords.longitude}&key=${GOOGLE_PLACES_API_KEY}`;
-                const resp = await fetch(url);
-                const data = await resp.json();
-                if (data.routes && data.routes.length) {
-                  const points = decodePolyline(data.routes[0].overview_polyline.points);
-                  setRoutePreview({ direct: points });
-                }
-              } catch (e) {
-                console.warn('Route fetch error:', e);
-              } finally {
-                setLoading(false);
-              }
-            }
-          }}>
-            <Ionicons name="navigate" size={24} color="#fff" />
-          </TouchableOpacity>
-        </View>
-        {loading && (
-          <ActivityIndicator size="small" color="#888" style={{ marginVertical: 8 }} />
-        )}
-        {suggestions.length > 0 && (
-          <FlatList
-            data={suggestions}
-            keyExtractor={(item) => item.place_id}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.suggestionItem}
-                onPress={() => handleSuggestionPress(item)}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.suggestionTitle}>
-                    {item.structured_formatting.main_text}
-                  </Text>
-                  <Text style={styles.suggestionSubtitle}>
-                    {item.structured_formatting.secondary_text}
-                  </Text>
-                  {fromCoords && toCoords && routePreview[item.place_id] && (
-                    <MapView
-                      style={{
-                        height: 80,
-                        width: '100%',
-                        marginTop: 8,
-                        borderRadius: 8,
-                      }}
-                      initialRegion={{
-                        latitude: fromCoords.latitude,
-                        longitude: fromCoords.longitude,
-                        latitudeDelta: 0.01,
-                        longitudeDelta: 0.01,
-                      }}
-                     mapType="hybrid"
-                    >
-                      <Polyline
-                        coordinates={routePreview[item.place_id]}
-                        strokeColor="#FF4F79"
-                        strokeWidth={3}
-                      />
-                    </MapView>
-                  )}
-                </View>
-              </TouchableOpacity>
-            )}
-            style={{ maxHeight: 180, marginTop: 4 }}
-          />
-        )}
-      </View>
-
-      <TouchableOpacity
-        style={[styles.startBtn, !(from && to) && { backgroundColor: '#ccc' }]}
-        disabled={!(from && to)}
-        
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFillObject}
+        initialRegion={{
+          latitude: userLocation?.latitude || 20.5937,
+          longitude: userLocation?.longitude || 78.9629,
+          latitudeDelta: LATITUDE_DELTA,
+          longitudeDelta: LONGITUDE_DELTA,
+        }}
       >
-        <Text style={styles.startBtnText}>Start</Text>
-      </TouchableOpacity>
-      {/* Always show MapView below input fields */}
-      <View style={{ flex: 1, minHeight: 250, marginVertical: 10 }}>
-        <MapView
-          style={{    height: 420,
-            width: "100%", // Ensure it takes full width
-            marginVertical: 20,
-            borderRadius: 20, // Rounded corners
-            borderWidth: 2, // Ensure border is visible
-            borderColor: "black",
-            overflow: "hidden",}}
-          initialRegion={userLocation ? {
-            latitude: userLocation.latitude,
-            longitude: userLocation.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          } : {
-            latitude: 20.5937, // Default: India center
-            longitude: 78.9629,
-            latitudeDelta: 10,
-            longitudeDelta: 10,
-          }}
-          region={fromCoords && toCoords ? {
-            latitude: (fromCoords.latitude + toCoords.latitude) / 2,
-            longitude: (fromCoords.longitude + toCoords.longitude) / 2,
-            latitudeDelta: Math.abs(fromCoords.latitude - toCoords.latitude) + 0.05,
-            longitudeDelta: Math.abs(fromCoords.longitude - toCoords.longitude) + 0.05,
-          } : undefined}
-        >
-          {userLocation && !fromCoords && !toCoords && (
-            <Marker coordinate={userLocation} title="Your Location" />
-          )}
-          {fromCoords && <Marker coordinate={fromCoords} title="From" pinColor="green" />}
-          {toCoords && <Marker coordinate={toCoords} title="To" pinColor="red" />}
-          {routePreview.direct && (
-            <Polyline coordinates={routePreview.direct} strokeWidth={4} strokeColor="#007AFF" />
-          )}
-        </MapView>
+        {allRoutesCoordinates.map((route, idx) => (
+          <Polyline key={idx} coordinates={route} strokeWidth={4} strokeColor="#FF4F79" />
+        ))}
+      </MapView>
+
+      <View style={styles.floatingInputCard}>
+        <View style={styles.inputRow}>
+          <Ionicons name="navigate" size={20} color="#888" />
+          <TextInput style={styles.input} value={from} onChangeText={setFrom} placeholder="From" />
+        </View>
+        <View style={styles.inputRow}>
+          <MaterialIcons name="place" size={20} color="#888" />
+          <TextInput style={styles.input} value={to} onChangeText={setTo} placeholder="To" />
+        </View>
+        <TouchableOpacity style={styles.button} onPress={isTracking ? handleStopJourney : handleStartJourney}>
+          <Text style={styles.buttonText}>
+            {loadingTracking ? "Loading..." : isTracking ? "Stop Journey" : "Start Journey"}
+          </Text>
+        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fef8f5',
-    paddingTop: 30,
-    paddingHorizontal: 10,
-  },
-  inputCard: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 18,
-    shadowColor: '#000',
-    shadowOpacity: 0.07,
+  floatingInputCard: {
+    position: "absolute",
+    top: Platform.OS === "ios" ? 60 : 40,
+    left: 16,
+    right: 16,
+    backgroundColor: "#fff",
+    padding: 15,
+    borderRadius: 12,
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
-    shadowRadius: 8,
-    elevation: 3,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 999,
   },
   inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-    backgroundColor: '#f7f7f7',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  icon: {
-    marginRight: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 10,
   },
   input: {
     flex: 1,
-    fontSize: 16,
-    color: '#222',
-    paddingVertical: 4,
+    marginLeft: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: "#f5f5f5",
+    borderRadius: 8,
   },
-  addBtn: {
-    backgroundColor: '#4caf50',
-    borderRadius: 16,
-    padding: 4,
-    marginLeft: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  suggestionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f7f7f7',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 8,
-    shadowColor: '#000',
-    shadowOpacity: 0.03,
-    shadowOffset: { width: 0, height: 1 },
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  suggestionTitle: {
-    fontSize: 16,
-    color: '#222',
-    fontWeight: '500',
-  },
-  suggestionSubtitle: {
-    fontSize: 13,
-    color: '#888',
-  },
-  startBtn: {
-    backgroundColor: '#4caf50',
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
+  button: {
     marginTop: 10,
-    marginHorizontal: 10,
-    elevation: 2,
+    padding: 12,
+    backgroundColor: "#FF4F79",
+    borderRadius: 8,
+    alignItems: "center",
   },
-  startBtnText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  buttonText: {
+    color: "#fff",
+    fontWeight: "bold",
   },
 });

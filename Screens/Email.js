@@ -1,21 +1,52 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Image } from "react-native";
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { AI_URL , AUTH_URL } from '../constants/api';
 
 const Email = ({ navigation }) => {
   const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleSendOtp = () => {
-    navigation.navigate("OTP");
+  const handleSendOtp = async () => {
+    if (!email) {
+      Alert.alert("Validation Error", "Please enter your email address.");
+      return;
+    }
+
+    // Check if the email format is valid
+    const emailRegex = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}$/;
+    if (!emailRegex.test(email)) {
+      Alert.alert("Validation Error", "Please enter a valid email address.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('http://192.168.145.21:3001/auth/forgot/send-otp', {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        Alert.alert("Success", data.message || "OTP sent to your email.");
+        navigation.navigate("OTP", { email });
+      } else {
+        Alert.alert("Error", data.message || "Failed to send OTP.");
+      }
+    } catch (error) {
+      Alert.alert("Error", "An error occurred while sending OTP. Please try again.");
+      console.error("Send OTP error:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.imageContainer}>
-        {/* <Image
-          source={require("../assets/email.png")}
-          style={styles.image}
-        /> */}
-      </View>
       <Text style={styles.title}>Email Verification</Text>
       <Text style={styles.subtitle}>Enter your email address to receive an OTP for verification.</Text>
       <TextInput
@@ -27,8 +58,8 @@ const Email = ({ navigation }) => {
         onChangeText={setEmail}
         autoCapitalize="none"
       />
-      <TouchableOpacity style={styles.button} onPress={handleSendOtp}>
-        <Text style={styles.buttonText}>Send OTP</Text>
+      <TouchableOpacity style={styles.button} onPress={handleSendOtp} disabled={loading}>
+        <Text style={styles.buttonText}>{loading ? "Sending..." : "Send OTP"}</Text>
       </TouchableOpacity>
       <TouchableOpacity onPress={() => navigation.goBack()}>
         <Text style={styles.link}>Back to Login</Text>
@@ -46,16 +77,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     paddingHorizontal: 20,
-  },
-  imageContainer: {
-    alignItems: "center",
-    marginBottom: 10,
-    width: "100%",
-  },
-  image: {
-    width: 120,
-    height: 120,
-    resizeMode: "contain",
   },
   title: {
     fontSize: 26,
@@ -83,11 +104,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#333",
     backgroundColor: "#f6f7fb",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 2,
   },
   button: {
     backgroundColor: "#1E90FF",
@@ -96,11 +112,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
     width: "100%",
-    shadowColor: "#1E90FF",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
   },
   buttonText: {
     color: "#fff",
